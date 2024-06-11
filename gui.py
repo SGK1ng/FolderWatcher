@@ -2,11 +2,12 @@ import os
 import json
 import mimetypes
 import time
+import math
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import tempfile
 from snapshot import create_snapshot, save_snapshot, load_snapshot
-from compare import compare_directories, get_file_attributes
+from compare import compare_directories, get_file_attributes, calculate_file_hash
 from about import about_fw
 from ads import list_ads_files
 
@@ -30,6 +31,7 @@ class Window:
         self.show_type = tk.BooleanVar(value=True)
         self.show_attributes = tk.BooleanVar(value=True)
         self.show_last_modified = tk.BooleanVar(value=True)
+        self.show_hash = tk.BooleanVar(value=False)
         self.last_directory1 = tk.StringVar()
         self.last_directory2 = tk.StringVar()
         self.directory_label1 = tk.StringVar(value="Directory 1")
@@ -97,29 +99,44 @@ class Window:
         for child in self.file_tree1.get_children():
             item = self.file_tree1.item(child)
             filename = item['values'][0]
-            filepath = os.path.join(self.last_directory1.get(), filename)
-            tags = self.get_tags(filename, only_in1_files, only_in2_files, modified_files)
-            self.file_tree1.item(child, tags=tags)
-        
-        self.file_tree1.tag_configure('new', background='lightgreen')
-        self.file_tree1.tag_configure('deleted', background='brown1')
-        self.file_tree1.tag_configure('modified', background='burlywood3')
-        self.file_tree1.tag_configure('attributes_modified', background='lightblue')
-        self.file_tree1.tag_configure('last_modified', background='lightpink')
-
+            self.apply_cell_tags(self.file_tree1, child, filename, modified_files, is_first_tree=True)
+            
         self.list_files(self.file_tree2, self.last_directory2.get())
         for child in self.file_tree2.get_children():
             item = self.file_tree2.item(child)
             filename = item['values'][0]
-            filepath = os.path.join(self.last_directory2.get(), filename)
-            tags = self.get_tags(filename, only_in2_files, only_in1_files, modified_files)
-            self.file_tree2.item(child, tags=tags)
+            self.apply_cell_tags(self.file_tree2, child, filename, modified_files, is_first_tree=False)
 
-        self.file_tree2.tag_configure('new', background='lightgreen')
-        self.file_tree2.tag_configure('deleted', background='brown1')
-        self.file_tree2.tag_configure('modified', background='burlywood3')
-        self.file_tree2.tag_configure('attributes_modified', background='lightblue')
-        self.file_tree2.tag_configure('last_modified', background='lightpink')
+        self.define_cell_tags(self.file_tree1)
+        self.define_cell_tags(self.file_tree2)
+
+    def apply_cell_tags(self, treeview, item_id, filename, modified_files, is_first_tree):
+        if filename in modified_files:
+            file_info = modified_files[filename]
+            values = list(treeview.item(item_id)['values'])
+            
+            for i, col in enumerate(treeview['columns']):
+                if col == self.translate("Size") and file_info['size']:
+                    values[i] = f'**{values[i]}**'
+                    treeview.tag_configure('size_modified', background='lightgreen')
+                if col == self.translate("Attributes") and file_info['attributes']:
+                    values[i] = f'**{values[i]}**'
+                    treeview.tag_configure('attributes_modified', background='lightblue')
+                if col == self.translate("Last Modified") and file_info['last_modified']:
+                    values[i] = f'**{values[i]}**'
+                    treeview.tag_configure('last_modified', background='lightpink')
+                if col == self.translate("Hash") and file_info['hash']:
+                    values[i] = f'**{values[i]}**'
+                    treeview.tag_configure('hash_modified', background='lightyellow')
+
+            treeview.item(item_id, values=values, tags='highlighted')
+
+    def define_cell_tags(self, treeview):
+        treeview.tag_configure('highlighted', background='lightgreen')
+        treeview.tag_configure('size_modified', background='lightgreen')
+        treeview.tag_configure('attributes_modified', background='lightblue')
+        treeview.tag_configure('last_modified', background='lightpink')
+        treeview.tag_configure('hash_modified', background='lightyellow')
 
     def get_tags(self, filename, primary_files, secondary_files, modified_files):
         tags = ()
@@ -135,6 +152,8 @@ class Window:
                 tags += ('attributes_modified',)
             if file_info['last_modified']:
                 tags += ('last_modified',)
+            if file_info['hash']:
+                tags += ('hash_modified',)
         return tags
 
     def create_menu(self):
@@ -219,6 +238,9 @@ class Window:
         self.show_last_modified_btn = tk.Checkbutton(checkbox_frame, text=self.translate("Show Last Modified"), variable=self.show_last_modified, background='white', takefocus=0)
         self.show_last_modified_btn.pack(side=tk.LEFT, padx=5)
         
+        self.show_hash_btn = tk.Checkbutton(checkbox_frame, text=self.translate("Show Hash"), variable=self.show_hash, background='white', takefocus=0)
+        self.show_hash_btn.pack(side=tk.LEFT, padx=5)
+
         self.ads_check = tk.Checkbutton(checkbox_frame, text=self.translate("Ads"), variable=self.use_ads, background='white', takefocus=0)
         self.ads_check.pack(side=tk.LEFT, padx=5)
 
@@ -234,7 +256,8 @@ class Window:
             self.translate("Size"),
             self.translate("Type"),
             self.translate("Attributes"),
-            self.translate("Last Modified")
+            self.translate("Last Modified"),
+            self.translate("Hash")
         ]
         self.file_tree1 = ttk.Treeview(self.root, columns=self.columns, show="headings")
         self.file_tree2 = ttk.Treeview(self.root, columns=self.columns, show="headings")
@@ -263,34 +286,60 @@ class Window:
                     ads_files = list_ads_files(item.path)
                     for ads_file, size in ads_files:
                         self.insert_file_item(treeview, ads_file, size, "ADS")
-                self.insert_file_item(treeview, item)
+                if item.is_dir():
+                    folder_size = self.calculate_folder_size(item.path)
+                    self.insert_file_item(treeview, item, folder_size, "Folder")
+                else:
+                    file_size = os.path.getsize(item.path)
+                    self.insert_file_item(treeview, item, file_size, "File")
+
+    def calculate_folder_size(self, folder):
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(folder):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                if not os.path.islink(fp):
+                    total_size += os.path.getsize(fp)
+        return total_size
+
+    def get_formated_size(self, size):
+        if size == 0:
+            return '0 B'
+        
+        size_name = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB')
+        i = int(math.floor(math.log(size, 1024)))
+        p = math.pow(1024, i)
+        formatted_size = round(size / p, 2)
+        
+        return f'{formatted_size} {size_name[i]}'
 
     def insert_file_item(self, treeview, item, item_size=None, item_type=""):
         if isinstance(item, os.DirEntry):
             display_text = item.name
             item_path = item.path
-            size_text = ""
-            type_text = ""
-            attributes_text = get_file_attributes(item_path)
-            last_modified_text = self.get_last_modified(item_path)
             if item.is_dir():
+                size_text = self.get_formated_size(item_size) if item_size is not None else ""
                 type_text = self.translate("Folder")
             else:
-                file_size = os.path.getsize(item_path)
+                size_text = self.get_formated_size(item_size) if item_size is not None else ""
                 mime_type, _ = mimetypes.guess_type(item_path)
-                file_type = self.get_file_description(mime_type)
-                size_text = f"{file_size} bytes"
-                type_text = file_type
+                type_text = self.get_file_description(mime_type)
+            attributes_text = get_file_attributes(item_path)
+            last_modified_text = self.get_last_modified(item_path)
+            hash_text = calculate_file_hash(item_path) if self.show_hash else ""
         else:
-            file_name, stream_name = item.rsplit(':', 1)
-            stream_name = stream_name.replace('$DATA', '').strip()
-            display_text = f"{os.path.basename(file_name)}:{stream_name}"
-            size_text = f"{item_size} bytes"
-            type_text = "ADS File" if ':' in item else "File"
-            attributes_text = ""
-            last_modified_text = ""
+            full_path = item
+            if ':' in full_path:
+                main_file_path, ads_stream = full_path.rsplit(':', 1)
+                main_file_name = os.path.basename(main_file_path)
+                display_text = f"{main_file_name}:{ads_stream}"
+                size_text = self.get_formated_size(item_size) if item_size is not None else ""
+                type_text = "ADS File"
+                attributes_text = ""
+                last_modified_text = ""
+                hash_text = ""
 
-        values = [display_text, size_text, type_text, attributes_text, last_modified_text]
+        values = [display_text, size_text, type_text, attributes_text, last_modified_text, hash_text]
         tags = ()
         if 'ADS' in item_type:
             tags = ('ads_file_pre',)
@@ -332,6 +381,8 @@ class Window:
             columns_to_display.append(self.translate("Attributes"))
         if self.show_last_modified.get():
             columns_to_display.append(self.translate("Last Modified"))
+        if self.show_hash.get():
+            columns_to_display.append(self.translate("Hash"))
 
         for tree in [self.file_tree1, self.file_tree2]:
             tree["columns"] = columns_to_display
@@ -354,6 +405,7 @@ class Window:
         self.show_type.trace_add('write', lambda *args: self.update_column_visibility())
         self.show_attributes.trace_add('write', lambda *args: self.update_column_visibility())
         self.show_last_modified.trace_add('write', lambda *args: self.update_column_visibility())
+        self.show_hash.trace_add('write', lambda *args: self.update_column_visibility())
         self.language.trace_add('write', lambda *args: self.update_display())
         self.use_ads.trace_add('write', lambda *args: self.update_display())
 
@@ -368,6 +420,7 @@ class Window:
         self.show_type_btn.config(text=self.translate("Show Type"))
         self.show_attributes_btn.config(text=self.translate("Show Attributes"))
         self.show_last_modified_btn.config(text=self.translate("Show Last Modified"))
+        self.show_hash_btn.config(text=self.translate("Show Hash"))
 
         self.create_menu()
         self.update_column_visibility()
@@ -383,4 +436,4 @@ class Window:
 if __name__ == "__main__":
     root = tk.Tk()
     app = Window(root)
-    root.mainloop() 
+    root.mainloop()
