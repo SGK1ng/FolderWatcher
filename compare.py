@@ -2,6 +2,7 @@ import os
 import time
 import win32api
 import win32con
+import hashlib
 from pyads import ADS
 
 def calculate_directory_size(path):
@@ -57,6 +58,17 @@ def list_ads_files(file_path):
         print(f"Error accessing ADS: {e}")
     return ads_files
 
+def calculate_file_hash(file_path, chunk_size=8192):
+    hash_sha256 = hashlib.sha256()
+    try:
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(chunk_size), b''):
+                hash_sha256.update(chunk)
+    except Exception as e:
+        print(f"Error calculating hash: {e}")
+        return None
+    return hash_sha256.hexdigest()
+
 def compare_directories(dir1, dir2):
     entries1 = {e.name: e for e in os.scandir(dir1)}
     entries2 = {e.name: e for e in os.scandir(dir2)}
@@ -65,14 +77,16 @@ def compare_directories(dir1, dir2):
         'size': os.path.getsize(os.path.join(dir1, f)),
         'attributes': get_file_attributes(os.path.join(dir1, f)),
         'last_modified': get_last_modified(os.path.join(dir1, f)),
-        'ads': list_ads_files(os.path.join(dir1, f))
+        'ads': list_ads_files(os.path.join(dir1, f)),
+        'hash': calculate_file_hash(os.path.join(dir1, f))
     } for f in entries1 if not entries1[f].is_dir()}
 
     files2 = {f: {
         'size': os.path.getsize(os.path.join(dir2, f)),
         'attributes': get_file_attributes(os.path.join(dir2, f)),
         'last_modified': get_last_modified(os.path.join(dir2, f)),
-        'ads': list_ads_files(os.path.join(dir2, f))
+        'ads': list_ads_files(os.path.join(dir2, f)),
+        'hash': calculate_file_hash(os.path.join(dir2, f))
     } for f in entries2 if not entries2[f].is_dir()}
 
     dirs1 = {d: calculate_directory_size(os.path.join(dir1, d)) for d in entries1 if entries1[d].is_dir()}
@@ -83,13 +97,15 @@ def compare_directories(dir1, dir2):
             'size': files1[f]['size'] != files2[f]['size'],
             'attributes': files1[f]['attributes'] != files2[f]['attributes'],
             'last_modified': files1[f]['last_modified'] != files2[f]['last_modified'],
-            'ads': files1[f]['ads'] != files2[f]['ads']
+            'ads': files1[f]['ads'] != files2[f]['ads'],
+            'hash': files1[f]['hash'] != files2[f]['hash']
         }
         for f in files1 if f in files2 and (
             files1[f]['size'] != files2[f]['size'] or
             files1[f]['attributes'] != files2[f]['attributes'] or
             files1[f]['last_modified'] != files2[f]['last_modified'] or
-            files1[f]['ads'] != files2[f]['ads']
+            files1[f]['ads'] != files2[f]['ads'] or
+            files1[f]['hash'] != files2[f]['hash']
         )
     }
 
@@ -100,3 +116,4 @@ def compare_directories(dir1, dir2):
     only_in2_dirs = set(dirs2.keys()) - set(dirs1.keys())
 
     return size_diff_files, only_in1_files, only_in2_files, only_in1_dirs, only_in2_dirs, size_diff_dirs
+
