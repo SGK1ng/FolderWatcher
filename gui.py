@@ -7,9 +7,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import tempfile
 from snapshot import create_snapshot, save_snapshot, load_snapshot
-from compare import compare_directories, get_file_attributes, calculate_file_hash
+from compare import compare_directories, get_file_attributes, calculate_file_hash, list_ads_files
 from about import about_fw
-from ads import list_ads_files
 
 class Window:
     def __init__(self, root):

@@ -1,8 +1,7 @@
 import os
 import time
-import win32api
-import win32con
 import hashlib
+import stat
 from pyads import ADS
 
 def calculate_directory_size(path):
@@ -15,30 +14,16 @@ def calculate_directory_size(path):
     return total_size
 
 def get_file_attributes(path):
-    attributes = []
-    attrs = win32api.GetFileAttributes(path)
-
-    if attrs & win32con.FILE_ATTRIBUTE_ARCHIVE:
-        attributes.append('A')
-    else:
-        attributes.append('-')
-
-    if attrs & win32con.FILE_ATTRIBUTE_HIDDEN:
-        attributes.append('H')
-    else:
-        attributes.append('-')
-
-    if attrs & win32con.FILE_ATTRIBUTE_SYSTEM:
-        attributes.append('S')
-    else:
-        attributes.append('-')
-
-    if attrs & win32con.FILE_ATTRIBUTE_READONLY:
-        attributes.append('R')
-    else:
-        attributes.append('-')
-
-    return ''.join(attributes)
+    stats = os.stat(path)
+    attrs = stats.st_file_attributes
+    attrs_to_test = [
+            (stat.FILE_ATTRIBUTE_ARCHIVE, 'a'), # Архивный файл
+            (stat.FILE_ATTRIBUTE_READONLY, 'r'), # Файл только для чтения
+            (stat.FILE_ATTRIBUTE_SYSTEM, 's'), # Системный файл
+            (stat.FILE_ATTRIBUTE_HIDDEN, 'h'), # Скрытый файл
+            (stat.FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, 'i') # Файл не индексируется для поиска
+        ]
+    return ''.join([ch if attrs & attr else "-" for attr, ch in attrs_to_test])
 
 def get_last_modified(path):
     last_modified_timestamp = os.path.getmtime(path)
