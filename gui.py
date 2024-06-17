@@ -7,8 +7,9 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import tempfile
 from snapshot import create_snapshot, save_snapshot, load_snapshot
-from compare import compare_directories, get_file_attributes, calculate_file_hash, list_ads_files
+from compare import compare_directories, get_file_attributes, calculate_file_hash
 from about import about_fw
+from ads import list_ads_files
 
 class Window:
     def __init__(self, root):
@@ -372,6 +373,7 @@ class Window:
 
     def update_column_visibility(self):
         columns_to_display = [self.translate("File Name")]
+
         if self.show_size.get():
             columns_to_display.append(self.translate("Size"))
         if self.show_type.get():
@@ -383,16 +385,21 @@ class Window:
         if self.show_hash.get():
             columns_to_display.append(self.translate("Hash"))
 
-        for tree in [self.file_tree1, self.file_tree2]:
-            tree["columns"] = columns_to_display
-            for col in columns_to_display:
-                tree.heading(col, text=col)
-                tree.column(col, width=100, minwidth=25, stretch=tk.YES)
+        initial_columns = [self.translate("File Name"), self.translate("Size"), self.translate("Type"), 
+                        self.translate("Attributes"), self.translate("Last Modified"), self.translate("Hash")]
 
-            current_columns = set(tree["columns"])
-            for col in list(current_columns):
-                if col not in columns_to_display:
-                    tree.column(col, width=0, minwidth=0, stretch=tk.NO)
+        for tree in [self.file_tree1, self.file_tree2]:
+            tree["columns"] = initial_columns
+
+            for col in initial_columns:
+                if col in columns_to_display:
+                    tree.heading(col, text=col)
+                    tree.column(col, width=100, minwidth=25, stretch=tk.YES)
+                else:
+                    try:
+                        tree.column(col, width=0, minwidth=0, stretch=tk.NO)
+                    except tk.TclError as e:
+                        print(f"Error hiding column {col}: {e}")
 
             if tree == self.file_tree1 and self.last_directory1.get():
                 self.list_files(self.file_tree1, self.last_directory1.get())
